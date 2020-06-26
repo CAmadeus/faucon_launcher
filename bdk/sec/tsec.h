@@ -31,4 +31,19 @@ typedef struct _tsec_ctxt_t
 
 int tsec_query(u8 *tsec_keys, u8 kb, tsec_ctxt_t *tsec_ctxt);
 
+typedef struct _tsec_exploit_ctxt_t
+{
+	const void *fw;
+	u32 size;
+	u32 exci;
+	u32 scp_sec_error;
+	u32 mailbox0;
+	u32 mailbox1;
+	u32 trace_pc;
+} tsec_exploit_ctxt_t;
+
+int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx);
+
+void tsec_dump_falcon_dmem(u32 *output);
+
 #endif

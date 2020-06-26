@@ -12,6 +12,8 @@ include ./Versions.inc
 
 ################################################################################
 
+TARGET_FAUCON = requiem
+
 TARGET := hekate
 BUILDDIR := build
 OUTPUTDIR := output
@@ -24,7 +26,7 @@ VPATH += $(dir $(wildcard ./$(BDKDIR)/)) $(dir $(wildcard ./$(BDKDIR)/*/)) $(dir
 # Main and graphics.
 OBJS = $(addprefix $(BUILDDIR)/$(TARGET)/, \
 	start.o exception_handlers.o \
-	main.o heap.o \
+	main_faucon.o heap.o \
 	gfx.o tui.o \
 	fe_emmc_tools.o fe_info.o fe_tools.o \
 )
@@ -46,7 +48,7 @@ OBJS += $(addprefix $(BUILDDIR)/$(TARGET)/, \
 )
 
 # Horizon.
-OBJS += $(addprefix $(BUILDDIR)/$(TARGET)/, \
+#OBJS += $(addprefix $(BUILDDIR)/$(TARGET)/, \
 	hos.o hos_config.o pkg1.o pkg2.o pkg2_ini_kippatch.o fss.o secmon_exo.o sept.o \
 )
 
@@ -66,6 +68,7 @@ CUSTOMDEFINES := -DIPL_LOAD_ADDR=$(IPL_LOAD_ADDR) -DBL_MAGIC=$(IPL_MAGIC)
 CUSTOMDEFINES += -DBL_VER_MJ=$(BLVERSION_MAJOR) -DBL_VER_MN=$(BLVERSION_MINOR) -DBL_VER_HF=$(BLVERSION_HOTFX) -DBL_RESERVED=$(BLVERSION_RSVD)
 CUSTOMDEFINES += -DNYX_VER_MJ=$(NYXVERSION_MAJOR) -DNYX_VER_MN=$(NYXVERSION_MINOR) -DNYX_VER_HF=$(NYXVERSION_HOTFX) -DNYX_RESERVED=$(NYXVERSION_RSVD)
 CUSTOMDEFINES += -DGFX_INC=$(GFX_INC) -DFFCFG_INC=$(FFCFG_INC)
+CUSTOMDEFINES += -DTARGET_FAUCON=$(TARGET_FAUCON)
 
 # 0: UART_A, 1: UART_B.
 #CUSTOMDEFINES += -DDEBUG_UART_PORT=0
@@ -77,11 +80,12 @@ CFLAGS = $(ARCH) -O2 -g -nostdlib -ffunction-sections -fdata-sections -fomit-fra
 LDFLAGS = $(ARCH) -nostartfiles -lgcc -Wl,--nmagic,--gc-sections -Xlinker --defsym=IPL_LOAD_ADDR=$(IPL_LOAD_ADDR)
 
 MODULEDIRS := $(wildcard modules/*)
+FAUCONDIR := ../falcon-tools/$(TARGET_FAUCON)
 NYXDIR := $(wildcard nyx)
 
 ################################################################################
 
-.PHONY: all clean $(MODULEDIRS) $(NYXDIR)
+.PHONY: all clean $(MODULEDIRS) $(NYXDIR) $(FAUCONDIR)
 
 all: $(TARGET).bin
 	@echo -n "Payload size is "
@@ -94,6 +98,7 @@ clean:
 	@rm -rf $(OBJS)
 	@rm -rf $(BUILDDIR)
 	@rm -rf $(OUTPUTDIR)
+	@$(MAKE) -C $(FAUCONDIR) clean
 
 $(MODULEDIRS):
 	@$(MAKE) -C $@ $(MAKECMDGOALS) -$(MAKEFLAGS)
@@ -101,7 +106,10 @@ $(MODULEDIRS):
 $(NYXDIR):
 	@$(MAKE) -C $@ $(MAKECMDGOALS) -$(MAKEFLAGS)
 
-$(TARGET).bin: $(BUILDDIR)/$(TARGET)/$(TARGET).elf $(MODULEDIRS) $(NYXDIR)
+$(FAUCONDIR):
+	@$(MAKE) -C $@ $(MAKECMDGOALS) -$(MAKEFLAGS)
+
+$(TARGET).bin: $(BUILDDIR)/$(TARGET)/$(TARGET).elf $(MODULEDIRS)
 	$(OBJCOPY) -S -O binary $< $(OUTPUTDIR)/$@
 	@printf ICTC49 >> $(OUTPUTDIR)/$@
 
@@ -117,7 +125,7 @@ $(BUILDDIR)/$(TARGET)/%.o: %.S
 	@echo Building $@
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(OBJS): $(BUILDDIR)/$(TARGET)
+$(OBJS): $(BUILDDIR)/$(TARGET) $(FAUCONDIR)
 
 $(BUILDDIR)/$(TARGET):
 	@mkdir -p "$(BUILDDIR)"

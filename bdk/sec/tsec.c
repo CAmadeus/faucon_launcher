@@ -53,7 +53,7 @@ static int _tsec_dma_pa_to_internal_100(int not_imem, int i_offset, int pa_offse
 	if (not_imem)
 		cmd = TSEC_DMATRFCMD_SIZE_256B; // DMA 256 bytes
 	else
-		cmd = TSEC_DMATRFCMD_IMEM;      // DMA IMEM (Instruction memmory)
+		cmd = TSEC_DMATRFCMD_IMEM; // DMA IMEM (Instruction memmory)
 
 	TSEC(TSEC_DMATRFMOFFS) = i_offset;
 	TSEC(TSEC_DMATRFFBOFFS) = pa_offset;
@@ -142,7 +142,7 @@ int tsec_query(u8 *tsec_keys, u8 kb, tsec_ctxt_t *tsec_ctxt)
 
 		// Fuse driver.
 		fuse = page_alloc(1);
-		memcpy((void *)&fuse[0x800/4], (void *)FUSE_BASE, 0x400);
+		memcpy((void *)&fuse[0x800 / 4], (void *)FUSE_BASE, 0x400);
 		fuse[0x82C / 4] = 0;
 		fuse[0x9E0 / 4] = (1 << (kb + 2)) - 1;
 		fuse[0x9E4 / 4] = (1 << (kb + 2)) - 1;
@@ -287,4 +287,155 @@ out:;
 	bpmp_clk_rate_set(BPMP_CLK_DEFAULT_BOOST);
 
 	return res;
+}
+
+int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx)
+{
+	int res = 0;
+	u8 *fwbuf = NULL;
+
+	bpmp_mmu_disable();
+	bpmp_clk_rate_set(BPMP_CLK_NORMAL);
+
+	// Enable clocks.
+	clock_enable_host1x();
+	usleep(2);
+	clock_enable_tsec();
+	clock_enable_sor_safe();
+	clock_enable_sor0();
+	clock_enable_sor1();
+	clock_enable_kfuse();
+
+	kfuse_wait_ready();
+
+	// Configure Falcon.
+	TSEC(TSEC_DMACTL) = 0;
+	TSEC(TSEC_IRQMSET) =
+		TSEC_IRQMSET_EXT(0xFF) |
+		TSEC_IRQMSET_WDTMR |
+		TSEC_IRQMSET_HALT |
+		TSEC_IRQMSET_EXTERR |
+		TSEC_IRQMSET_SWGEN0 |
+		TSEC_IRQMSET_SWGEN1;
+	TSEC(TSEC_IRQDEST) =
+		TSEC_IRQDEST_EXT(0xFF) |
+		TSEC_IRQDEST_HALT |
+		TSEC_IRQDEST_EXTERR |
+		TSEC_IRQDEST_SWGEN0 |
+		TSEC_IRQDEST_SWGEN1;
+	TSEC(TSEC_ITFEN) = TSEC_ITFEN_CTXEN | TSEC_ITFEN_MTHDEN;
+	if (!_tsec_dma_wait_idle())
+	{
+		res = -1;
+		goto out;
+	}
+
+	// Load firmware or emulate memio environment for newer TSEC fw.
+	fwbuf = (u8 *)malloc(0x4000);
+	u8 *fwbuf_aligned = (u8 *)ALIGN((u32)fwbuf, 0x100);
+	memcpy(fwbuf_aligned, ctx->fw, ctx->size);
+	TSEC(TSEC_DMATRFBASE) = (u32)fwbuf_aligned >> 8;
+
+	for (u32 addr = 0; addr < ctx->size; addr += 0x100)
+	{
+		if (!_tsec_dma_pa_to_internal_100(false, addr, addr))
+		{
+			res = -2;
+			goto out_free;
+		}
+	}
+
+	// Execute firmware.
+	HOST1X(HOST1X_CH0_SYNC_SYNCPT_160) = 0x34C2E1DA;
+	TSEC(TSEC_STATUS) = 0;
+	TSEC(TSEC_BOOTKEYVER) = 1; // HOS uses key version 1.
+	TSEC(TSEC_BOOTVEC) = 0;
+	TSEC(TSEC_CPUCTL) = TSEC_CPUCTL_STARTCPU;
+
+	if (!_tsec_dma_wait_idle())
+	{
+		res = -3;
+		goto out_free;
+	}
+	u32 timeout = get_tmr_ms() + 2000;
+	while (!TSEC(TSEC_STATUS))
+		if (get_tmr_ms() > timeout)
+		{
+			res = -4;
+			goto out_free;
+		}
+
+	if (TSEC(TSEC_STATUS) != 0xB0B0B0B0)
+	{
+		res = -5;
+		goto out_free;
+	}
+
+	// Fetch result.
+	HOST1X(HOST1X_CH0_SYNC_SYNCPT_160) = 0;
+	u32 buf[4];
+	buf[0] = SOR1(SOR_NV_PDISP_SOR_DP_HDCP_BKSV_LSB);
+	buf[1] = SOR1(SOR_NV_PDISP_SOR_TMDS_HDCP_BKSV_LSB);
+	buf[2] = SOR1(SOR_NV_PDISP_SOR_TMDS_HDCP_CN_MSB);
+	buf[3] = SOR1(SOR_NV_PDISP_SOR_TMDS_HDCP_CN_LSB);
+	SOR1(SOR_NV_PDISP_SOR_DP_HDCP_BKSV_LSB) = 0;
+	SOR1(SOR_NV_PDISP_SOR_TMDS_HDCP_BKSV_LSB) = 0;
+	SOR1(SOR_NV_PDISP_SOR_TMDS_HDCP_CN_MSB) = 0;
+	SOR1(SOR_NV_PDISP_SOR_TMDS_HDCP_CN_LSB) = 0;
+
+	memcpy(tsec_keys, &buf, 0x10);
+
+out_free:
+	ctx->mailbox0 = TSEC(TSEC_FALCON_MAILBOX0);
+	ctx->mailbox1 = TSEC(TSEC_FALCON_MAILBOX1);
+	ctx->exci = TSEC(TSEC_FALCON_EXCI);
+	ctx->scp_sec_error = TSEC(TSEC_SCP_SEC_ERR);
+	ctx->trace_pc = TSEC(TSEC_FALCON_TRACEPC);
+	free(fwbuf);
+
+out:;
+
+	// Disable clocks.
+	clock_disable_kfuse();
+	clock_disable_sor1();
+	clock_disable_sor0();
+	clock_disable_sor_safe();
+	clock_disable_tsec();
+	bpmp_mmu_enable();
+	bpmp_clk_rate_set(BPMP_CLK_DEFAULT_BOOST);
+
+	return res;
+}
+
+void tsec_dump_falcon_dmem(u32 *output)
+{
+	// 1) TSEC exposes fixed DMEM access window 0, which we can use.
+	// 2) TSEC's DMEM size is hardcoded to 0x4000 bytes.
+
+	// Enable clocks.
+	clock_enable_host1x();
+	usleep(2);
+	clock_enable_tsec();
+	clock_enable_sor_safe();
+	clock_enable_sor0();
+	clock_enable_sor1();
+	clock_enable_kfuse();
+
+	kfuse_wait_ready();
+
+	// Configure DMEM to incrementally dump every word in DMEM starting from address 0.
+	TSEC(TSEC_FALCON_DMEMC0) = ((0 << 2) | (1 << 25));
+
+	for (u32 addr = 0; addr < 0x1000; addr++)
+	{
+		// Incrementally dump every word of Falcon DMEM into the output buffer.
+		output[addr] = TSEC(TSEC_FALCON_DMEMD0);
+	}
+
+	// Disable clocks.
+	clock_disable_kfuse();
+	clock_disable_sor1();
+	clock_disable_sor0();
+	clock_disable_sor_safe();
+	clock_disable_tsec();
 }
