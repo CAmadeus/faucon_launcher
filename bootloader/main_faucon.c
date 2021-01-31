@@ -182,7 +182,7 @@ bool is_ipl_updated(void *buf, char *path, bool force)
 	return true;
 }
 
-int dump_tsec_dmem_to_file(void *falcon_dmem)
+int dump_tsec_dmem_to_file(u8 *falcon_dmem)
 {
 	int res = 1;
 
@@ -203,11 +203,13 @@ void launch_tsec_firmware(const void *fw, u32 fw_size)
 	gfx_clear_partial_grey(0x1B, 0, 1256);
 	gfx_con_setpos(0, 0);
 
-	u8 keys[0x10 * 2];
+	u8 keys[0x20];
 	memset(keys, 0x00, 0x20);
 
+	u8 *falcon_dmem = malloc(0x4000);
+	memset(falcon_dmem, 0x00, 0x4000);
+
 	// Prepare the TSEC exploit context which holds result data.
-	u8 falcon_dmem[0x4000];
 	tsec_exploit_ctxt_t ctx;
 	ctx.fw = fw;
 	ctx.size = fw_size;
@@ -290,6 +292,8 @@ void launch_tsec_firmware(const void *fw, u32 fw_size)
 
 		btn_wait();
 	}
+
+	free(falcon_dmem);
 
 	power_off();
 }
