@@ -182,7 +182,7 @@ bool is_ipl_updated(void *buf, char *path, bool force)
 	return true;
 }
 
-static inline int dump_tsec_dmem_to_file()
+int dump_tsec_dmem_to_file(void *falcon_dmem)
 {
 	int res = 1;
 
@@ -190,9 +190,6 @@ static inline int dump_tsec_dmem_to_file()
 	{
 		char path[64];
 		emmcsn_path_impl(path, "/dumps", "tsec_dmem.bin", NULL);
-
-		u8 falcon_dmem[0x4000];
-		tsec_dump_falcon_dmem((u32 *)falcon_dmem);
 
 		res = sd_save_to_file(falcon_dmem, 0x4000, path);
 		sd_unmount();
@@ -210,13 +207,15 @@ void launch_tsec_firmware(const void *fw, u32 fw_size)
 	memset(keys, 0x00, 0x20);
 
 	// Prepare the TSEC exploit context which holds result data.
+	u8 falcon_dmem[0x4000];
 	tsec_exploit_ctxt_t ctx;
 	ctx.fw = fw;
 	ctx.size = fw_size;
+	ctx.dmem = falcon_dmem;
 
 	// Launch the TSEC firmware and wait for the result.
 	int res = 0;
-	if (tsec_launch_exploit(keys, &ctx) < 0)
+	if (tsec_launch_exploit(keys, &ctx, true) < 0)
 	{
 		res = -1;
 	}
@@ -271,7 +270,7 @@ void launch_tsec_firmware(const void *fw, u32 fw_size)
 	u32 btn = btn_wait();
 	if (btn & BTN_POWER)
 	{
-		if (!dump_tsec_dmem_to_file())
+		if (!dump_tsec_dmem_to_file(falcon_dmem))
 		{
 			gfx_puts("\nDone! Press any buttons to power off.\n");
 		}

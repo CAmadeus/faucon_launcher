@@ -40,10 +40,9 @@ typedef struct _tsec_exploit_ctxt_t
 	u32 mailbox0;
 	u32 mailbox1;
 	u32 trace_pc;
+	const void *dmem;
 } tsec_exploit_ctxt_t;
 
-int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx);
-
-void tsec_dump_falcon_dmem(u32 *output);
+int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx, bool dump_dmem);
 
 #endif

@@ -62,6 +62,22 @@ static int _tsec_dma_pa_to_internal_100(int not_imem, int i_offset, int pa_offse
 	return _tsec_dma_wait_idle();
 }
 
+static void _tsec_dump_falcon_dmem(tsec_exploit_ctxt_t *ctx)
+{
+	// 1) TSEC exposes fixed DMEM access window 0, which we can use.
+	// 2) TSEC's DMEM size is hardcoded to 0x4000 bytes.
+
+	// Configure DMEM to incrementally dump every word in DMEM starting from address 0.
+	TSEC(TSEC_FALCON_DMEMC0) = ((0 << 2) | (1 << 25));
+
+	u32 *output = (u32 *)ctx->dmem;
+	for (u32 addr = 0; addr < 0x1000; addr++)
+	{
+		// Incrementally dump every word of Falcon DMEM into the output buffer.
+		output[addr] = TSEC(TSEC_FALCON_DMEMD0);
+	}
+}
+
 int tsec_query(u8 *tsec_keys, u8 kb, tsec_ctxt_t *tsec_ctxt)
 {
 	int res = 0;
@@ -289,7 +305,7 @@ out:;
 	return res;
 }
 
-int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx)
+int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx, bool dump_dmem)
 {
 	int res = 0;
 	u8 *fwbuf = NULL;
@@ -385,6 +401,12 @@ int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx)
 
 	memcpy(tsec_keys, &buf, 0x10);
 
+	// Dump DMEM, if desired.
+	if (dump_dmem && ctx->dmem)
+	{
+		_tsec_dump_falcon_dmem(ctx);
+	}
+
 out_free:
 	ctx->mailbox0 = TSEC(TSEC_FALCON_MAILBOX0);
 	ctx->mailbox1 = TSEC(TSEC_FALCON_MAILBOX1);
@@ -405,37 +427,4 @@ out:;
 	bpmp_clk_rate_set(BPMP_CLK_DEFAULT_BOOST);
 
 	return res;
-}
-
-void tsec_dump_falcon_dmem(u32 *output)
-{
-	// 1) TSEC exposes fixed DMEM access window 0, which we can use.
-	// 2) TSEC's DMEM size is hardcoded to 0x4000 bytes.
-
-	// Enable clocks.
-	clock_enable_host1x();
-	usleep(2);
-	clock_enable_tsec();
-	clock_enable_sor_safe();
-	clock_enable_sor0();
-	clock_enable_sor1();
-	clock_enable_kfuse();
-
-	kfuse_wait_ready();
-
-	// Configure DMEM to incrementally dump every word in DMEM starting from address 0.
-	TSEC(TSEC_FALCON_DMEMC0) = ((0 << 2) | (1 << 25));
-
-	for (u32 addr = 0; addr < 0x1000; addr++)
-	{
-		// Incrementally dump every word of Falcon DMEM into the output buffer.
-		output[addr] = TSEC(TSEC_FALCON_DMEMD0);
-	}
-
-	// Disable clocks.
-	clock_disable_kfuse();
-	clock_disable_sor1();
-	clock_disable_sor0();
-	clock_disable_sor_safe();
-	clock_disable_tsec();
 }
