@@ -43,6 +43,6 @@ typedef struct _tsec_exploit_ctxt_t
 	const void *dmem;
 } tsec_exploit_ctxt_t;
 
-int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx, bool dump_dmem);
+int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx);
 
 #endif

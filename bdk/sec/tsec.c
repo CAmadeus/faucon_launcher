@@ -62,7 +62,7 @@ static int _tsec_dma_pa_to_internal_100(int not_imem, int i_offset, int pa_offse
 	return _tsec_dma_wait_idle();
 }
 
-static void _tsec_dump_falcon_dmem(tsec_exploit_ctxt_t *ctx)
+static void _tsec_dump_falcon_dmem_via_io(tsec_exploit_ctxt_t *ctx)
 {
 	// 1) TSEC exposes fixed DMEM access window 0, which we can use.
 	// 2) TSEC's DMEM size is hardcoded to 0x4000 bytes.
@@ -305,7 +305,7 @@ out:;
 	return res;
 }
 
-int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx, bool dump_dmem)
+int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx)
 {
 	int res = 0;
 	u8 *fwbuf = NULL;
@@ -363,8 +363,8 @@ int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx, bool dump_dmem)
 
 	// Execute firmware.
 	HOST1X(HOST1X_CH0_SYNC_SYNCPT_160) = 0x34C2E1DA;
-	TSEC(TSEC_STATUS) = 0;
-	TSEC(TSEC_BOOTKEYVER) = 1; // HOS uses key version 1.
+	TSEC(TSEC_FALCON_MAILBOX0) = (u32)ctx->dmem;
+	TSEC(TSEC_FALCON_MAILBOX1) = 0;
 	TSEC(TSEC_BOOTVEC) = 0;
 	TSEC(TSEC_CPUCTL) = TSEC_CPUCTL_STARTCPU;
 
@@ -381,7 +381,7 @@ int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx, bool dump_dmem)
 			goto out_free;
 		}
 
-	if (TSEC(TSEC_STATUS) != 0xB0B0B0B0)
+	if (TSEC(TSEC_STATUS) == 0)
 	{
 		res = -5;
 		goto out_free;
@@ -401,10 +401,12 @@ int tsec_launch_exploit(u8 *tsec_keys, tsec_exploit_ctxt_t *ctx, bool dump_dmem)
 
 	memcpy(tsec_keys, &buf, 0x10);
 
-	// Dump DMEM, if desired.
-	if (dump_dmem && ctx->dmem)
+	// Dump DMEM, if necessary.
+	if (ctx->dmem)
 	{
-		_tsec_dump_falcon_dmem(ctx);
+		u32 dmem_word = *(u32 *)ctx->dmem;
+		if (dmem_word == 0)
+			_tsec_dump_falcon_dmem_via_io(ctx);
 	}
 
 out_free:

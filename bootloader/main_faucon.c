@@ -206,7 +206,8 @@ void launch_tsec_firmware(const void *fw, u32 fw_size)
 	u8 keys[0x20];
 	memset(keys, 0x00, 0x20);
 
-	u8 *falcon_dmem = malloc(0x4000);
+	u8 *falcon_dmem_raw = malloc(0x4100);
+	u8 *falcon_dmem = (u8 *)ALIGN((u32)falcon_dmem_raw, 0x100);
 	memset(falcon_dmem, 0x00, 0x4000);
 
 	// Prepare the TSEC exploit context which holds result data.
@@ -217,7 +218,7 @@ void launch_tsec_firmware(const void *fw, u32 fw_size)
 
 	// Launch the TSEC firmware and wait for the result.
 	int res = 0;
-	if (tsec_launch_exploit(keys, &ctx, true) < 0)
+	if (tsec_launch_exploit(keys, &ctx) < 0)
 	{
 		res = -1;
 	}
